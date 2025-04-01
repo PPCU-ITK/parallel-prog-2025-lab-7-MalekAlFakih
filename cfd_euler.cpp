@@ -77,6 +77,11 @@ int main(){
 
     // Boolean mask for solid cells
     bool* solid = (bool*)malloc(total_size * sizeof(bool));
+    #pragma omp target data map(tofrom: rho[0:total_size], rhou[0:total_size], \
+                                      rhov[0:total_size], E[0:total_size], \
+                                      rho_new[0:total_size], rhou_new[0:total_size], \
+                                      rhov_new[0:total_size], E_new[0:total_size]) \
+                              map(to: solid[0:total_size])
 
     // Remember to initialize if needed
     for (int i = 0; i < total_size; i++) {
@@ -138,6 +143,7 @@ int main(){
     for (int n = 0; n < nSteps; n++){
         // --- Apply boundary conditions on ghost cells ---
         // Left boundary (inflow): fixed free-stream state
+        #pragma omp target teams distribute parallel for
         for (int j = 0; j < Ny+2; j++){
             rho[0*(Ny+2)+j] = rho0;
             rhou[0*(Ny+2)+j] = rho0*u0;
@@ -151,22 +157,20 @@ int main(){
             rhov[(Nx+1)*(Ny+2)+j] = rhov[Nx*(Ny+2)+j];
             E[(Nx+1)*(Ny+2)+j] = E[Nx*(Ny+2)+j];
         }
-        // Bottom boundary: reflective
+        #pragma omp target teams distribute parallel for
         for (int i = 0; i < Nx+2; i++){
             rho[i*(Ny+2)+0] = rho[i*(Ny+2)+1];
             rhou[i*(Ny+2)+0] = rhou[i*(Ny+2)+1];
             rhov[i*(Ny+2)+0] = -rhov[i*(Ny+2)+1];
             E[i*(Ny+2)+0] = E[i*(Ny+2)+1];
-        }
-        // Top boundary: reflective
-        for (int i = 0; i < Nx+2; i++){
             rho[i*(Ny+2)+(Ny+1)] = rho[i*(Ny+2)+Ny];
             rhou[i*(Ny+2)+(Ny+1)] = rhou[i*(Ny+2)+Ny];
             rhov[i*(Ny+2)+(Ny+1)] = -rhov[i*(Ny+2)+Ny];
             E[i*(Ny+2)+(Ny+1)] = E[i*(Ny+2)+Ny];
-        }
+            }
 
         // --- Update interior cells using a Lax-Friedrichs scheme ---
+        #pragma omp target teams distribute parallel for collapse(2)
         for (int i = 1; i <= Nx; i++){
             for (int j = 1; j <= Ny; j++){
                 // If the cell is inside the solid obstacle, do not update it
@@ -215,6 +219,7 @@ int main(){
         }
 
         // Copy updated values back
+        #pragma omp target teams distribute parallel for collapse(2)
         for (int i = 1; i <= Nx; i++){
             for (int j = 1; j <= Ny; j++){
                 rho[i*(Ny+2)+j] = rho_new[i*(Ny+2)+j];
@@ -226,6 +231,7 @@ int main(){
 
         // Calculate total kinetic energy
         double total_kinetic = 0.0;
+        #pragma omp target teams distribute parallel for collapse(2) reduction(+:local_kinetic)
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
                 double u = rhou[i*(Ny+2)+j] / rho[i*(Ny+2)+j];
